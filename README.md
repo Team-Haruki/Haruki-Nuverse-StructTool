@@ -1,15 +1,27 @@
 # Haruki-Nuverse-StructTool
-Nuverse regions msgpack structure file extractor and generator
+Nuverse regions msgpack structure file extractor and generator.
+
+Using [custom Avro schema](https://github.com/middlered/unity-msgpack-schema-exporter?tab=readme-ov-file#custom-avro-fields) format to restore stripped msgpack format.
 
 
-### Build
+### CLI Build
 
-*TBA*
+```bash
+go build
+```
 
-### Usage
+### CLI Usage
 
-*TBA*
+```bash
+go run . --schema <schema.avsc.json> --class <ClassName> --hex <hex>
+```
 
-### Build C# exporter
+### Lib Test
+```bash
+cd avro
+go test -v
+```
 
-See the [exporter repo readme](https://github.com/middlered/unity-msgpack-schema-exporter?tab=readme-ov-file#cli-single-file-executable)
+### Generate Avro schema
+
+See the [exporter repo cli readme](https://github.com/middlered/unity-msgpack-schema-exporter?tab=readme-ov-file#cli)
