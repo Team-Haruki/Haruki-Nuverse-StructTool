@@ -1,27 +1,15 @@
 # Haruki-Nuverse-StructTool
 Nuverse regions msgpack structure file extractor and generator
 
+
 ### Build
 
-```bash
-go build ./cmd/structtool
-```
+*TBA*
 
-### Check structure consistency
+### Usage
 
-```bash
-go run ./cmd/structtool check -dump dump.cs -structures structures.json -suite-class SuiteMaster
-go run ./cmd/structtool check -dump dump.cs -structures suite_structures.json -suite-class SuiteUser
-```
+*TBA*
 
-### Update structures from `dump.cs`
+### Build C# exporter
 
-```bash
-go run ./cmd/structtool update -dump dump.cs -structures structures.json -suite-class SuiteMaster -keys cards,events
-```
-
-### Extract User msgpack-array report and suite structures
-
-```bash
-go run ./cmd/structtool extract-user -dump dump.cs -report-out user_msgpack_array_report.json -suite-out suite_structures.json
-```
+See the [exporter repo readme](https://github.com/middlered/unity-msgpack-schema-exporter?tab=readme-ov-file#cli-single-file-executable)
