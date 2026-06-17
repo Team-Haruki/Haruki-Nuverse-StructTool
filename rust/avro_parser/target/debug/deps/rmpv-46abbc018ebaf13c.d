@@ -1,0 +1,11 @@
+/private/tmp/Haruki-Nuverse-StructTool-v2/rust/avro_parser/target/debug/deps/rmpv-46abbc018ebaf13c.d: /Users/seiun/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmpv-1.3.1/src/lib.rs /Users/seiun/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmpv-1.3.1/src/decode/mod.rs /Users/seiun/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmpv-1.3.1/src/decode/value.rs /Users/seiun/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmpv-1.3.1/src/decode/value_ref.rs /Users/seiun/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmpv-1.3.1/src/encode/mod.rs /Users/seiun/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmpv-1.3.1/src/encode/value.rs /Users/seiun/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmpv-1.3.1/src/encode/value_ref.rs
+
+/private/tmp/Haruki-Nuverse-StructTool-v2/rust/avro_parser/target/debug/deps/librmpv-46abbc018ebaf13c.rmeta: /Users/seiun/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmpv-1.3.1/src/lib.rs /Users/seiun/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmpv-1.3.1/src/decode/mod.rs /Users/seiun/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmpv-1.3.1/src/decode/value.rs /Users/seiun/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmpv-1.3.1/src/decode/value_ref.rs /Users/seiun/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmpv-1.3.1/src/encode/mod.rs /Users/seiun/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmpv-1.3.1/src/encode/value.rs /Users/seiun/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmpv-1.3.1/src/encode/value_ref.rs
+
+/Users/seiun/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmpv-1.3.1/src/lib.rs:
+/Users/seiun/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmpv-1.3.1/src/decode/mod.rs:
+/Users/seiun/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmpv-1.3.1/src/decode/value.rs:
+/Users/seiun/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmpv-1.3.1/src/decode/value_ref.rs:
+/Users/seiun/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmpv-1.3.1/src/encode/mod.rs:
+/Users/seiun/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmpv-1.3.1/src/encode/value.rs:
+/Users/seiun/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmpv-1.3.1/src/encode/value_ref.rs:
