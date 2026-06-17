@@ -2,3 +2,5 @@
 *.avsc
 *.exe
 Haruki-Nuverse-StructTool
+!data/master.avsc
+!data/suite.avsc

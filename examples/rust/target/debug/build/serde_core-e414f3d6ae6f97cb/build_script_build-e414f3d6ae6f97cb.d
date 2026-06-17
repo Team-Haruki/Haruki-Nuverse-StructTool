@@ -1,0 +1,5 @@
+/private/tmp/Haruki-Nuverse-StructTool-v2/examples/rust/target/debug/build/serde_core-e414f3d6ae6f97cb/build_script_build-e414f3d6ae6f97cb.d: /Users/seiun/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/build.rs
+
+/private/tmp/Haruki-Nuverse-StructTool-v2/examples/rust/target/debug/build/serde_core-e414f3d6ae6f97cb/build_script_build-e414f3d6ae6f97cb: /Users/seiun/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/build.rs
+
+/Users/seiun/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/build.rs:
