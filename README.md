@@ -24,13 +24,13 @@ go run . --schema data/master.avsc --class Sekai.MasterActionSet --hex 910104c0c
 ## Python Example
 
 ```bash
-python3 examples/python/restore.py --schema data/master.avsc --class Sekai.MasterActionSet --hex 910104c0c2c0ad61735f636473686f705f6d6f62c09101a46e6f6e65cf000001577fc7f5b001
+python3 -c 'from avro_parser.schema import LoadFile, Decode; reg, root = LoadFile("data/master.avsc"); print(Decode(reg["Sekai.MasterActionSet"], bytes.fromhex("910104c0c2c0ad61735f636473686f705f6d6f62c09101a46e6f6e65cf000001577fc7f5b001")))'
 ```
 
 ## Rust Example
 
 ```bash
-cd examples/rust
+cd rust/avro_parser
 cargo run -- --schema ../../data/master.avsc --class Sekai.MasterActionSet --hex 910104c0c2c0ad61735f636473686f705f6d6f62c09101a46e6f6e65cf000001577fc7f5b001
 ```
 
