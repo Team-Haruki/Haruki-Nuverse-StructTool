@@ -469,9 +469,11 @@ func decodeStringKeyedRecord(schema *Schema, dec *msgpack.Decoder) (any, error) 
 			}
 			result[f.Name] = v
 		} else {
-			if _, err := dec.DecodeInterface(); err != nil {
+			v, err := dec.DecodeInterface()
+			if err != nil {
 				return nil, err
 			}
+			result[key] = v
 		}
 	}
 	return result, nil

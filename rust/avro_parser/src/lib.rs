@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
 use std::sync::Arc;
 
@@ -73,7 +73,11 @@ pub fn decode(schema: &Arc<Schema>, data: &[u8], registry: &Registry) -> Result<
     restore_json(schema, &json, registry)
 }
 
-pub fn encode(_schema: &Arc<Schema>, _value: &JsonValue, _registry: &Registry) -> Result<Vec<u8>, String> {
+pub fn encode(
+    _schema: &Arc<Schema>,
+    _value: &JsonValue,
+    _registry: &Registry,
+) -> Result<Vec<u8>, String> {
     Err("encode is not implemented in the Rust library yet".to_string())
 }
 
@@ -131,8 +135,13 @@ impl SchemaBuilder {
         }
     }
 
-    fn parse_object(&mut self, obj: &serde_json::Map<String, JsonValue>) -> Result<Arc<Schema>, String> {
-        let ty = obj.get("type").ok_or_else(|| "schema missing type".to_string())?;
+    fn parse_object(
+        &mut self,
+        obj: &serde_json::Map<String, JsonValue>,
+    ) -> Result<Arc<Schema>, String> {
+        let ty = obj
+            .get("type")
+            .ok_or_else(|| "schema missing type".to_string())?;
         if ty.is_array() {
             return self.parse_schema(ty);
         }
@@ -142,7 +151,12 @@ impl SchemaBuilder {
                 kind: SchemaKind::Array,
                 name: None,
                 fields: Vec::new(),
-                items: Some(self.parse_schema(obj.get("items").ok_or_else(|| "array missing items".to_string())?)?),
+                items: Some(
+                    self.parse_schema(
+                        obj.get("items")
+                            .ok_or_else(|| "array missing items".to_string())?,
+                    )?,
+                ),
                 values: None,
                 key_type: None,
                 union_of: Vec::new(),
@@ -153,8 +167,16 @@ impl SchemaBuilder {
                 name: None,
                 fields: Vec::new(),
                 items: None,
-                values: Some(self.parse_schema(obj.get("values").ok_or_else(|| "map missing values".to_string())?)?),
-                key_type: obj.get("msgpack_key_type").and_then(|v| v.as_str()).map(str::to_string),
+                values: Some(
+                    self.parse_schema(
+                        obj.get("values")
+                            .ok_or_else(|| "map missing values".to_string())?,
+                    )?,
+                ),
+                key_type: obj
+                    .get("msgpack_key_type")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
                 union_of: Vec::new(),
                 union_disp: Vec::new(),
             })),
@@ -162,9 +184,19 @@ impl SchemaBuilder {
         }
     }
 
-    fn parse_record(&mut self, obj: &serde_json::Map<String, JsonValue>) -> Result<Arc<Schema>, String> {
-        let short_name = obj.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-        let namespace = obj.get("namespace").and_then(|v| v.as_str()).unwrap_or_default();
+    fn parse_record(
+        &mut self,
+        obj: &serde_json::Map<String, JsonValue>,
+    ) -> Result<Arc<Schema>, String> {
+        let short_name = obj
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let namespace = obj
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
         let full_name = if !namespace.is_empty() && !short_name.contains('.') {
             format!("{namespace}.{short_name}")
         } else {
@@ -174,7 +206,12 @@ impl SchemaBuilder {
         let fields = obj
             .get("fields")
             .and_then(|v| v.as_array())
-            .map(|items| items.iter().map(|item| self.parse_field(item)).collect::<Result<Vec<_>, _>>())
+            .map(|items| {
+                items
+                    .iter()
+                    .map(|item| self.parse_field(item))
+                    .collect::<Result<Vec<_>, _>>()
+            })
             .transpose()?
             .unwrap_or_default();
 
@@ -182,7 +219,8 @@ impl SchemaBuilder {
             .get("msgpack_unions")
             .and_then(|v| v.as_array())
             .map(|items| {
-                items.iter()
+                items
+                    .iter()
                     .filter_map(|item| {
                         Some(UnionVariant {
                             key: item.get("key")?.as_i64()?,
@@ -214,19 +252,28 @@ impl SchemaBuilder {
     }
 
     fn parse_field(&mut self, raw: &JsonValue) -> Result<Field, String> {
-        let obj = raw.as_object().ok_or_else(|| "field must be object".to_string())?;
+        let obj = raw
+            .as_object()
+            .ok_or_else(|| "field must be object".to_string())?;
         let name = obj
             .get("name")
             .and_then(|v| v.as_str())
             .ok_or_else(|| "field missing name".to_string())?
             .to_string();
-        let ty = self.parse_schema(obj.get("type").ok_or_else(|| "field missing type".to_string())?)?;
+        let ty = self.parse_schema(
+            obj.get("type")
+                .ok_or_else(|| "field missing type".to_string())?,
+        )?;
         let msgpack_key = match obj.get("msgpack_key") {
             Some(JsonValue::Number(n)) => MsgpackKey::Int(n.as_i64().unwrap_or_default()),
             Some(JsonValue::String(s)) => MsgpackKey::String(s.clone()),
             _ => MsgpackKey::String(name.clone()),
         };
-        Ok(Field { name, ty, msgpack_key })
+        Ok(Field {
+            name,
+            ty,
+            msgpack_key,
+        })
     }
 
     fn primitive_or_ref(&self, name: &str) -> Arc<Schema> {
@@ -265,7 +312,11 @@ fn resolve_schema(schema: &Arc<Schema>, registry: &Registry) -> Arc<Schema> {
     schema.clone()
 }
 
-fn restore_json(schema: &Arc<Schema>, value: &JsonValue, registry: &Registry) -> Result<JsonValue, String> {
+fn restore_json(
+    schema: &Arc<Schema>,
+    value: &JsonValue,
+    registry: &Registry,
+) -> Result<JsonValue, String> {
     let schema = resolve_schema(schema, registry);
     match schema.kind {
         SchemaKind::Null
@@ -292,16 +343,26 @@ fn restore_json(schema: &Arc<Schema>, value: &JsonValue, registry: &Registry) ->
             }
         }
         SchemaKind::Array => {
-            let items = schema.items.as_ref().ok_or_else(|| "array missing items".to_string())?;
-            let arr = value.as_array().ok_or_else(|| "value is not array".to_string())?;
+            let items = schema
+                .items
+                .as_ref()
+                .ok_or_else(|| "array missing items".to_string())?;
+            let arr = value
+                .as_array()
+                .ok_or_else(|| "value is not array".to_string())?;
             arr.iter()
                 .map(|item| restore_json(items, item, registry))
                 .collect::<Result<Vec<_>, _>>()
                 .map(JsonValue::Array)
         }
         SchemaKind::Map => {
-            let values = schema.values.as_ref().ok_or_else(|| "map missing values".to_string())?;
-            let obj = value.as_object().ok_or_else(|| "value is not object".to_string())?;
+            let values = schema
+                .values
+                .as_ref()
+                .ok_or_else(|| "map missing values".to_string())?;
+            let obj = value
+                .as_object()
+                .ok_or_else(|| "value is not object".to_string())?;
             let mut out = JsonMap::new();
             for (k, v) in obj {
                 out.insert(k.clone(), restore_json(values, v, registry)?);
@@ -312,9 +373,15 @@ fn restore_json(schema: &Arc<Schema>, value: &JsonValue, registry: &Registry) ->
     }
 }
 
-fn restore_record(schema: &Schema, value: &JsonValue, registry: &Registry) -> Result<JsonValue, String> {
+fn restore_record(
+    schema: &Schema,
+    value: &JsonValue,
+    registry: &Registry,
+) -> Result<JsonValue, String> {
     if !schema.union_disp.is_empty() {
-        let arr = value.as_array().ok_or_else(|| "union dispatch is not array".to_string())?;
+        let arr = value
+            .as_array()
+            .ok_or_else(|| "union dispatch is not array".to_string())?;
         if arr.len() != 2 {
             return Ok(value.clone());
         }
@@ -345,13 +412,21 @@ fn restore_record(schema: &Schema, value: &JsonValue, registry: &Registry) -> Re
 
     if let Some(obj) = value.as_object() {
         let mut out = JsonMap::new();
+        let mut consumed = HashSet::new();
         for field in &schema.fields {
-            let raw = match &field.msgpack_key {
-                MsgpackKey::String(key) => obj.get(key),
-                MsgpackKey::Int(idx) => obj.get(&idx.to_string()),
+            let key = match &field.msgpack_key {
+                MsgpackKey::String(key) => key.clone(),
+                MsgpackKey::Int(idx) => idx.to_string(),
             };
+            let raw = obj.get(&key);
             if let Some(item) = raw {
+                consumed.insert(key);
                 out.insert(field.name.clone(), restore_json(&field.ty, item, registry)?);
+            }
+        }
+        for (key, item) in obj {
+            if !consumed.contains(key) {
+                out.insert(key.clone(), item.clone());
             }
         }
         return Ok(JsonValue::Object(out));
@@ -379,7 +454,11 @@ fn rmpv_to_json(value: rmpv::Value) -> Result<JsonValue, String> {
         rmpv::Value::F64(f) => serde_json::Number::from_f64(f)
             .map(JsonValue::Number)
             .unwrap_or(JsonValue::Null),
-        rmpv::Value::String(s) => JsonValue::String(s.to_string()),
+        rmpv::Value::String(s) => JsonValue::String(
+            s.as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| s.to_string()),
+        ),
         rmpv::Value::Binary(_) | rmpv::Value::Ext(_, _) => JsonValue::Null,
         rmpv::Value::Array(arr) => JsonValue::Array(
             arr.into_iter()
@@ -390,7 +469,10 @@ fn rmpv_to_json(value: rmpv::Value) -> Result<JsonValue, String> {
             let mut out = JsonMap::new();
             for (k, v) in map {
                 let key = match k {
-                    rmpv::Value::String(s) => s.to_string(),
+                    rmpv::Value::String(s) => s
+                        .as_str()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| s.to_string()),
                     rmpv::Value::Integer(i) => i.to_string(),
                     _ => continue,
                 };
@@ -399,4 +481,47 @@ fn rmpv_to_json(value: rmpv::Value) -> Result<JsonValue, String> {
             JsonValue::Object(out)
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn string_keyed_decode_normalizes_mapped_keys_and_preserves_unknown() {
+        let schema_json = br#"{
+          "type": "record",
+          "name": "Summary",
+          "namespace": "Test",
+          "fields": [
+            {"name": "id", "type": "int", "msgpack_key": "Id"},
+            {"name": "exchangeCategory", "type": "string", "msgpack_key": "ExchangeCategory"}
+          ]
+        }"#;
+        let (registry, schema) = load_bytes(schema_json).unwrap();
+
+        let payload = rmpv::Value::Map(vec![
+            (
+                rmpv::Value::String("Id".into()),
+                rmpv::Value::Integer(1.into()),
+            ),
+            (
+                rmpv::Value::String("ExchangeCategory".into()),
+                rmpv::Value::String("normal".into()),
+            ),
+            (
+                rmpv::Value::String("unknownPascal".into()),
+                rmpv::Value::Boolean(true),
+            ),
+        ]);
+        let mut bytes = Vec::new();
+        rmpv::encode::write_value(&mut bytes, &payload).unwrap();
+
+        let restored = decode(&schema, &bytes, &registry).unwrap();
+        assert_eq!(restored["id"], serde_json::json!(1));
+        assert_eq!(restored["exchangeCategory"], serde_json::json!("normal"));
+        assert!(restored.get("Id").is_none());
+        assert!(restored.get("ExchangeCategory").is_none());
+        assert_eq!(restored["unknownPascal"], serde_json::json!(true));
+    }
 }

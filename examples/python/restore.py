@@ -70,12 +70,20 @@ def restore_value(schema, value, registry):
                         out[field["name"]] = restore_value(field["type"], raw, registry)
             return out
         if isinstance(value, dict):
-            out = dict(value)
+            out = {}
+            consumed = set()
             for field in schema.get("fields", []):
                 key = field.get("msgpack_key", field["name"])
-                raw = value.get(str(key)) if isinstance(key, int) else value.get(key)
-                if raw is not None:
+                lookup_key = str(key) if isinstance(key, int) else key
+                if lookup_key in value:
+                    consumed.add(lookup_key)
+                    raw = value[lookup_key]
+                    if raw is None:
+                        continue
                     out[field["name"]] = restore_value(field["type"], raw, registry)
+            for key, raw in value.items():
+                if key not in consumed:
+                    out[key] = raw
             return out
     return value
 

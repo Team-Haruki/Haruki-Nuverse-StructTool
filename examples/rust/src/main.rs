@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::io::Cursor;
@@ -177,7 +177,8 @@ impl SchemaBuilder {
             .get("fields")
             .and_then(|v| v.as_array())
             .map(|items| {
-                items.iter()
+                items
+                    .iter()
                     .map(|item| self.parse_field(item))
                     .collect::<Result<Vec<_>, _>>()
             })
@@ -209,7 +210,10 @@ impl SchemaBuilder {
             .and_then(|v| v.as_str())
             .ok_or_else(|| "field missing name".to_string())?
             .to_string();
-        let ty = self.parse_schema(obj.get("type").ok_or_else(|| "field missing type".to_string())?)?;
+        let ty = self.parse_schema(
+            obj.get("type")
+                .ok_or_else(|| "field missing type".to_string())?,
+        )?;
         let key = match obj.get("msgpack_key") {
             Some(JsonValue::Number(n)) => MsgpackKey::Int(n.as_i64().unwrap_or_default()),
             Some(JsonValue::String(s)) => MsgpackKey::String(s.clone()),
@@ -265,16 +269,26 @@ fn restore_json(
             }
         }
         SchemaKind::Array => {
-            let items = schema.items.as_ref().ok_or_else(|| "array missing items".to_string())?;
-            let arr = value.as_array().ok_or_else(|| "value is not array".to_string())?;
+            let items = schema
+                .items
+                .as_ref()
+                .ok_or_else(|| "array missing items".to_string())?;
+            let arr = value
+                .as_array()
+                .ok_or_else(|| "value is not array".to_string())?;
             arr.iter()
                 .map(|item| restore_json(items, item, registry))
                 .collect::<Result<Vec<_>, _>>()
                 .map(JsonValue::Array)
         }
         SchemaKind::Map => {
-            let values = schema.values.as_ref().ok_or_else(|| "map missing values".to_string())?;
-            let obj = value.as_object().ok_or_else(|| "value is not object".to_string())?;
+            let values = schema
+                .values
+                .as_ref()
+                .ok_or_else(|| "map missing values".to_string())?;
+            let obj = value
+                .as_object()
+                .ok_or_else(|| "value is not object".to_string())?;
             let mut out = JsonMap::new();
             for (k, v) in obj {
                 out.insert(k.clone(), restore_json(values, v, registry)?);
@@ -304,16 +318,24 @@ fn restore_record(
         return Ok(JsonValue::Object(out));
     }
     if let Some(obj) = value.as_object() {
-        let mut out = obj.clone();
+        let mut out = JsonMap::new();
+        let mut consumed = HashSet::new();
         for field in &schema.fields {
-            let item = match &field.key {
-                MsgpackKey::String(key) => obj.get(key),
-                MsgpackKey::Int(idx) => obj.get(&idx.to_string()),
+            let key = match &field.key {
+                MsgpackKey::String(key) => key.clone(),
+                MsgpackKey::Int(idx) => idx.to_string(),
             };
+            let item = obj.get(&key);
             if let Some(item) = item {
+                consumed.insert(key);
                 if !item.is_null() {
                     out.insert(field.name.clone(), restore_json(&field.ty, item, registry)?);
                 }
+            }
+        }
+        for (key, item) in obj {
+            if !consumed.contains(key) {
+                out.insert(key.clone(), item.clone());
             }
         }
         return Ok(JsonValue::Object(out));
@@ -357,7 +379,11 @@ fn rmpv_to_json(value: rmpv::Value) -> Result<JsonValue, Box<dyn std::error::Err
         rmpv::Value::F64(f) => serde_json::Number::from_f64(f)
             .map(JsonValue::Number)
             .unwrap_or(JsonValue::Null),
-        rmpv::Value::String(s) => JsonValue::String(s.to_string()),
+        rmpv::Value::String(s) => JsonValue::String(
+            s.as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| s.to_string()),
+        ),
         rmpv::Value::Binary(_) | rmpv::Value::Ext(_, _) => JsonValue::Null,
         rmpv::Value::Array(arr) => JsonValue::Array(
             arr.into_iter()
@@ -368,7 +394,10 @@ fn rmpv_to_json(value: rmpv::Value) -> Result<JsonValue, Box<dyn std::error::Err
             let mut out = JsonMap::new();
             for (k, v) in map {
                 let key = match k {
-                    rmpv::Value::String(s) => s.to_string(),
+                    rmpv::Value::String(s) => s
+                        .as_str()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| s.to_string()),
                     rmpv::Value::Integer(i) => i.to_string(),
                     _ => continue,
                 };

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+
+	msgpack "github.com/vmihailenco/msgpack/v5"
 )
 
 const simpleItemSchema = `{
@@ -128,6 +130,50 @@ func TestStringKeyedDecode(t *testing.T) {
 	}
 	if m["active"].(bool) != true {
 		t.Errorf("active: want true, got %v", m["active"])
+	}
+}
+
+func TestStringKeyedDecodeNormalizesMappedKeysAndPreservesUnknown(t *testing.T) {
+	const schemaJSON = `{
+	  "type": "record",
+	  "name": "Summary",
+	  "namespace": "Test",
+	  "fields": [
+	    {"name": "id", "type": "int", "msgpack_key": "Id"},
+	    {"name": "exchangeCategory", "type": "string", "msgpack_key": "ExchangeCategory"}
+	  ]
+	}`
+	reg := mustLoad(t, schemaJSON)
+	schema := reg["Test.Summary"]
+
+	encoded, err := msgpack.Marshal(map[string]any{
+		"Id":               int64(1),
+		"ExchangeCategory": "normal",
+		"unknownPascal":    true,
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	decoded, err := Decode(schema, encoded)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	m := decoded.(map[string]any)
+	if toInt(m["id"]) != 1 {
+		t.Errorf("id: want 1, got %v", m["id"])
+	}
+	if m["exchangeCategory"] != "normal" {
+		t.Errorf("exchangeCategory: want normal, got %v", m["exchangeCategory"])
+	}
+	if _, ok := m["Id"]; ok {
+		t.Errorf("Id should have been consumed")
+	}
+	if _, ok := m["ExchangeCategory"]; ok {
+		t.Errorf("ExchangeCategory should have been consumed")
+	}
+	if m["unknownPascal"] != true {
+		t.Errorf("unknownPascal should be preserved, got %v", m["unknownPascal"])
 	}
 }
 

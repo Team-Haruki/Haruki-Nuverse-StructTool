@@ -177,10 +177,15 @@ def _decode_record(schema: Schema, value: Any):
             elif isinstance(field.msgpack_key, int):
                 by_key[str(field.msgpack_key)] = field
         result = {}
+        consumed = set()
         for key, item in value.items():
             field = by_key.get(str(key))
             if field is not None:
+                consumed.add(key)
                 result[field.name] = _decode_value(field.type, item)
+        for key, item in value.items():
+            if key not in consumed:
+                result[key] = item
         return result
     return value
 
