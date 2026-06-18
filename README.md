@@ -46,6 +46,18 @@ Recommended usage:
 - use `data/master.avsc` for CDN `master-data-<cdnVersion>.info` payloads
 - use `data/suite.avsc` for profile, ranking, and suite-style compact user payloads
 
+## Field naming policy
+
+The committed Haruki schemas use restored JSON field names, not raw C# member names. Field names are normalized to camelCase and leading backing underscores are removed, while `msgpack_key` keeps the original MessagePack key needed for compact payload decoding.
+
+Examples:
+
+- `Id` with `msgpack_key: 0` is emitted as field name `id`
+- `ExchangeCategory` with `msgpack_key: 2` is emitted as field name `exchangeCategory`
+- `_assetbundleName` with `msgpack_key: 11` is emitted as field name `assetbundleName`
+
+Raw output from the upstream Unity msgpack schema exporter may still contain C# member names for some int-keyed records. Apply the Haruki normalization step before replacing `data/master.avsc` or `data/suite.avsc`.
+
 ## Generate Avro schema
 
 The `.avsc` files are generated from DummyDll metadata, typically `Assembly-CSharp.dll`.
