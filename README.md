@@ -89,7 +89,7 @@ The exporter format reference is here:
 - [unity-msgpack-schema-exporter CLI readme](https://github.com/middlered/unity-msgpack-schema-exporter?tab=readme-ov-file#cli)
 - [custom Avro fields](https://github.com/middlered/unity-msgpack-schema-exporter?tab=readme-ov-file#custom-avro-fields)
 
-The `exporter` submodule points at the upstream exporter as a format reference and comparison target. It does not need to be repointed for normal Haruki schema refreshes unless Haruki switches to a fork that includes the same field normalization semantics.
+The upstream exporter is a format reference only; this repository does not depend on its code.
 
 If you already have a DummyDll dump, the general workflow is:
 

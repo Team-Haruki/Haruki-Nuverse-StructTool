@@ -1,3 +1,0 @@
-[submodule "exporter"]
-	path = exporter
-	url = https://github.com/middlered/unity-msgpack-schema-exporter
