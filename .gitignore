@@ -4,7 +4,8 @@
 Haruki-Nuverse-StructTool
 !data/master.avsc
 !data/suite.avsc
-examples/python/__pycache__/
-examples/rust/target/
+__pycache__/
+rust/avro_parser/target/
+python/*.egg-info/
 .DS_Store
 .idea/
