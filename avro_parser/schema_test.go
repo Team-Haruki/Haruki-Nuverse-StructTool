@@ -277,6 +277,41 @@ func TestIntKeyedNullLabel(t *testing.T) {
 	}
 }
 
+func TestNilForNonNullablePrimitiveDecodesToNull(t *testing.T) {
+	reg := mustLoad(t, intKeyedSchema)
+	schema := reg["IntKeyedItem"]
+
+	// [nil, "x", nil] — id (int) and value (double) are non-nullable in the
+	// schema, but a nil payload must still decode to null, not a zero value,
+	// matching the Python and Rust ports.
+	payload, err := hex.DecodeString("93c0a178c0")
+	if err != nil {
+		t.Fatalf("hex: %v", err)
+	}
+	decoded, err := Decode(schema, payload)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	m := decoded.(map[string]any)
+	if m["id"] != nil {
+		t.Errorf("id: want nil, got %v", m["id"])
+	}
+	if m["value"] != nil {
+		t.Errorf("value: want nil, got %v", m["value"])
+	}
+	if m["label"].(string) != "x" {
+		t.Errorf("label: want x, got %v", m["label"])
+	}
+
+	reEncoded, err := Encode(schema, decoded)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	if hex.EncodeToString(reEncoded) != "93c0a178c0" {
+		t.Errorf("round-trip: want 93c0a178c0, got %s", hex.EncodeToString(reEncoded))
+	}
+}
+
 func TestIntKeyMapRoundtrip(t *testing.T) {
 	reg := mustLoad(t, intKeyedDictSchema)
 	schema := reg["IntKeyedDict"]

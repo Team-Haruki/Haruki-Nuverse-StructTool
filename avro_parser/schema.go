@@ -344,6 +344,12 @@ func decodeValue(schema *Schema, dec *msgpack.Decoder) (any, error) {
 	}
 	schema = schema.resolve()
 
+	// A nil payload decodes to null regardless of the schema type, matching
+	// the Python and Rust ports and keeping Encode/Decode round-trips exact.
+	if code, err := dec.PeekCode(); err == nil && isNilCode(code) {
+		return nil, dec.DecodeNil()
+	}
+
 	switch schema.Type {
 	case "null":
 		return nil, dec.DecodeNil()
