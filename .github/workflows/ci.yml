@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go build ./...
+      - run: go test ./...
+
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/avro_parser
+      - run: cargo check --manifest-path rust/avro_parser/Cargo.toml
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ./python
+      - run: |
+          python3 -c 'from avro_parser import LoadFile, Decode; reg, root = LoadFile("data/master.avsc"); print(Decode(reg["Sekai.MasterActionSet"], bytes.fromhex("9B0104A46E6F6E65C2C0AD61735F636473686F705F6D6F62C09101C0CF00000157B64DF001C0")))'
