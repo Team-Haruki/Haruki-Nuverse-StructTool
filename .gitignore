@@ -6,3 +6,5 @@ Haruki-Nuverse-StructTool
 !data/suite.avsc
 examples/python/__pycache__/
 examples/rust/target/
+.DS_Store
+.idea/
