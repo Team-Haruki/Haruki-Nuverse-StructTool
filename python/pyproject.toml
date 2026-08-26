@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "haruki-nuverse-structtool"
+version = "0.1.0"
+description = "Avro-schema-based compact msgpack decode/encode for Nuverse payloads"
+requires-python = ">=3.10"
+dependencies = ["msgpack>=1.0"]
+
+[tool.setuptools]
+packages = ["avro_parser"]
