@@ -20,20 +20,30 @@ go run . --schema <schema.avsc.json> --class <ClassName> --hex <hex>
 Example:
 
 ```bash
-go run . --schema data/master.avsc --class Sekai.MasterActionSet --hex 910104c0c2c0ad61735f636473686f705f6d6f62c09101a46e6f6e65cf000001577fc7f5b001
+go run . --schema data/master.avsc --class Sekai.MasterActionSet --hex 9B0104A46E6F6E65C2C0AD61735F636473686F705F6D6F62C09101C0CF00000157B64DF001C0
 ```
 
 ## Python Example
 
+The Python package lives in `python/avro_parser`. Install it (this also pulls in the `msgpack` dependency):
+
 ```bash
-python3 -c 'from avro_parser.schema import LoadFile, Decode; reg, root = LoadFile("data/master.avsc"); print(Decode(reg["Sekai.MasterActionSet"], bytes.fromhex("910104c0c2c0ad61735f636473686f705f6d6f62c09101a46e6f6e65cf000001577fc7f5b001")))'
+pip install -e python/
 ```
+
+Then, from the repository root:
+
+```bash
+python3 -c 'from avro_parser import LoadFile, Decode; reg, root = LoadFile("data/master.avsc"); print(Decode(reg["Sekai.MasterActionSet"], bytes.fromhex("9B0104A46E6F6E65C2C0AD61735F636473686F705F6D6F62C09101C0CF00000157B64DF001C0")))'
+```
+
+Note: run the import with the package installed (or with `PYTHONPATH=python`). The top-level Go `avro_parser/` directory otherwise shadows the Python package as an empty namespace package.
 
 ## Rust Example
 
 ```bash
 cd rust/avro_parser
-cargo run -- --schema ../../data/master.avsc --class Sekai.MasterActionSet --hex 910104c0c2c0ad61735f636473686f705f6d6f62c09101a46e6f6e65cf000001577fc7f5b001
+cargo run -- --schema ../../data/master.avsc --class Sekai.MasterActionSet --hex 9B0104A46E6F6E65C2C0AD61735F636473686F705F6D6F62C09101C0CF00000157B64DF001C0
 ```
 
 ## Included Avro files
@@ -95,6 +105,6 @@ In the Haruki-Sekai-API repository, these files are produced from the schema bun
 
 ```bash
 go test ./...
-cd examples/rust && cargo check
-python3 -m py_compile ../python/restore.py
+cargo check --manifest-path rust/avro_parser/Cargo.toml
+PYTHONPATH=python python3 -c 'import avro_parser'
 ```
