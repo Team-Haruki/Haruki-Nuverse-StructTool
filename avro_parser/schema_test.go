@@ -542,6 +542,14 @@ func TestKeyConversions(t *testing.T) {
 }
 
 func TestValueConversions(t *testing.T) {
+	testIntegerConversions(t)
+	testFloatConversions(t)
+	testBoolConversions(t)
+	testStringAndSliceConversions(t)
+}
+
+func testIntegerConversions(t *testing.T) {
+	t.Helper()
 	for _, input := range []any{int(1), int8(1), int16(1), int32(1), int64(1), uint(1), uint64(1), float32(1), float64(1)} {
 		if got, ok := toInt64(input); !ok || got != 1 {
 			t.Errorf("toInt64(%T): got %d, %v", input, got, ok)
@@ -550,6 +558,10 @@ func TestValueConversions(t *testing.T) {
 	if _, ok := toInt64("bad"); ok {
 		t.Error("toInt64 should reject strings")
 	}
+}
+
+func testFloatConversions(t *testing.T) {
+	t.Helper()
 	for _, input := range []any{float64(2), float32(2), int64(2), int(2)} {
 		if got, ok := toFloat64(input); !ok || got != 2 {
 			t.Errorf("toFloat64(%T): got %v, %v", input, got, ok)
@@ -558,6 +570,10 @@ func TestValueConversions(t *testing.T) {
 	if _, ok := toFloat64("bad"); ok {
 		t.Error("toFloat64 should reject strings")
 	}
+}
+
+func testBoolConversions(t *testing.T) {
+	t.Helper()
 	if got, ok := toBool(true); !ok || !got {
 		t.Error("toBool(true) failed")
 	}
@@ -567,6 +583,10 @@ func TestValueConversions(t *testing.T) {
 	if _, ok := toBool("bad"); ok {
 		t.Error("toBool should reject strings")
 	}
+}
+
+func testStringAndSliceConversions(t *testing.T) {
+	t.Helper()
 	if got, _ := toString([]byte("bytes")); got != "bytes" {
 		t.Errorf("toString bytes: %q", got)
 	}
@@ -582,6 +602,17 @@ func TestValueConversions(t *testing.T) {
 }
 
 func TestSchemaParsingEdges(t *testing.T) {
+	testSchemaLoadingErrors(t)
+
+	reg := Registry{"Known": {Type: "record", Name: "Known"}}
+	testPrimitiveReferences(t, reg)
+	testRawSchemaParsing(t, reg)
+	testInvalidSchemaParts(t, reg)
+	testQualifiedRecordAndReferences(t, reg)
+}
+
+func testSchemaLoadingErrors(t *testing.T) {
+	t.Helper()
 	if _, _, err := LoadFile(filepath.Join(t.TempDir(), "missing.avsc")); err == nil {
 		t.Fatal("LoadFile should reject a missing file")
 	}
@@ -594,8 +625,10 @@ func TestSchemaParsingEdges(t *testing.T) {
 	if _, _, err := LoadBytes([]byte(`{"type":"record","name":"Bad","fields":1}`)); err == nil {
 		t.Fatal("LoadBytes should propagate an error from a single schema")
 	}
+}
 
-	reg := Registry{"Known": {Type: "record", Name: "Known"}}
+func testPrimitiveReferences(t *testing.T, reg Registry) {
+	t.Helper()
 	if got := primitiveOrRef("Known", reg); got != reg["Known"] {
 		t.Fatal("primitiveOrRef should return an existing named schema")
 	}
@@ -605,7 +638,10 @@ func TestSchemaParsingEdges(t *testing.T) {
 	if got := primitiveOrRef("boolean", reg); got.Type != "boolean" {
 		t.Fatalf("primitive: %#v", got)
 	}
+}
 
+func testRawSchemaParsing(t *testing.T, reg Registry) {
+	t.Helper()
 	if got, err := parseSchema(nil, reg); err != nil || got.Type != "null" {
 		t.Fatalf("empty schema: %#v, %v", got, err)
 	}
@@ -624,7 +660,10 @@ func TestSchemaParsingEdges(t *testing.T) {
 	if got, err := parseObject(json.RawMessage(`{"type":["null","string"]}`), reg); err != nil || got.Type != "union" {
 		t.Fatalf("union shorthand: %#v, %v", got, err)
 	}
+}
 
+func testInvalidSchemaParts(t *testing.T, reg Registry) {
+	t.Helper()
 	invalidCases := []struct {
 		name string
 		call func() error
@@ -696,7 +735,10 @@ func TestSchemaParsingEdges(t *testing.T) {
 			}
 		})
 	}
+}
 
+func testQualifiedRecordAndReferences(t *testing.T, reg Registry) {
+	t.Helper()
 	qualified, err := parseRecord(map[string]json.RawMessage{
 		"name":   json.RawMessage(`"Other.AlreadyQualified"`),
 		"fields": json.RawMessage(`[{"name":"plain","type":"string"}]`),
@@ -803,18 +845,7 @@ func TestDecoderErrorsAndNilContainers(t *testing.T) {
 		{Name: "id", Type: &Schema{Type: "int"}, MsgpackKey: "id"},
 	}}
 
-	if got, err := decodeIntKeyedRecord(intRecord, newDecoder(0xc0)); err != nil || got != nil {
-		t.Fatalf("nil int record: %#v, %v", got, err)
-	}
-	if got, err := decodeStringKeyedRecord(stringIntRecord, newDecoder(0xc0)); err != nil || got != nil {
-		t.Fatalf("nil string record: %#v, %v", got, err)
-	}
-	if got, err := decodeArray(&Schema{Items: &Schema{Type: "int"}}, newDecoder(0xc0)); err != nil || got != nil {
-		t.Fatalf("nil array: %#v, %v", got, err)
-	}
-	if got, err := decodeMap(&Schema{}, newDecoder(0xc0)); err != nil || got != nil {
-		t.Fatalf("nil map: %#v, %v", got, err)
-	}
+	testNilContainers(t, intRecord, stringIntRecord)
 
 	errorCases := []struct {
 		name string
@@ -871,6 +902,33 @@ func TestDecoderErrorsAndNilContainers(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) { wantError(t, tt.call) })
 	}
 
+	testDecoderFallbacks(t, intRecord)
+}
+
+func testNilContainers(t *testing.T, intRecord, stringIntRecord *Schema) {
+	t.Helper()
+	newDecoder := func(data ...byte) *msgpack.Decoder {
+		return msgpack.NewDecoder(bytes.NewReader(data))
+	}
+	if got, err := decodeIntKeyedRecord(intRecord, newDecoder(0xc0)); err != nil || got != nil {
+		t.Fatalf("nil int record: %#v, %v", got, err)
+	}
+	if got, err := decodeStringKeyedRecord(stringIntRecord, newDecoder(0xc0)); err != nil || got != nil {
+		t.Fatalf("nil string record: %#v, %v", got, err)
+	}
+	if got, err := decodeArray(&Schema{Items: &Schema{Type: "int"}}, newDecoder(0xc0)); err != nil || got != nil {
+		t.Fatalf("nil array: %#v, %v", got, err)
+	}
+	if got, err := decodeMap(&Schema{}, newDecoder(0xc0)); err != nil || got != nil {
+		t.Fatalf("nil map: %#v, %v", got, err)
+	}
+}
+
+func testDecoderFallbacks(t *testing.T, intRecord *Schema) {
+	t.Helper()
+	newDecoder := func(data ...byte) *msgpack.Decoder {
+		return msgpack.NewDecoder(bytes.NewReader(data))
+	}
 	if got, err := decodeUnionDispatch(&Schema{}, newDecoder(0xc0)); err != nil || got != nil {
 		t.Fatalf("nil dispatch: %#v, %v", got, err)
 	}
