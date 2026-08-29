@@ -1,8 +1,10 @@
 package avro_parser
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +13,20 @@ import (
 
 	msgpack "github.com/vmihailenco/msgpack/v5"
 )
+
+var errForcedWrite = errors.New("forced write failure")
+
+type failAfterWriter struct {
+	remaining int
+}
+
+func (w *failAfterWriter) Write(p []byte) (int, error) {
+	if w.remaining == 0 {
+		return 0, errForcedWrite
+	}
+	w.remaining--
+	return len(p), nil
+}
 
 const simpleItemSchema = `{
   "type": "record",
@@ -563,4 +579,404 @@ func TestValueConversions(t *testing.T) {
 	if _, ok := toSlice([]int{1, 2}); ok {
 		t.Error("toSlice should reject typed slices")
 	}
+}
+
+func TestSchemaParsingEdges(t *testing.T) {
+	if _, _, err := LoadFile(filepath.Join(t.TempDir(), "missing.avsc")); err == nil {
+		t.Fatal("LoadFile should reject a missing file")
+	}
+	if _, _, err := LoadBytes([]byte("{")); err == nil {
+		t.Fatal("LoadBytes should reject malformed JSON")
+	}
+	if _, _, err := LoadBytes([]byte(`[{"type":"record","name":"Bad","fields":1}]`)); err == nil {
+		t.Fatal("LoadBytes should propagate an error from an array member")
+	}
+	if _, _, err := LoadBytes([]byte(`{"type":"record","name":"Bad","fields":1}`)); err == nil {
+		t.Fatal("LoadBytes should propagate an error from a single schema")
+	}
+
+	reg := Registry{"Known": {Type: "record", Name: "Known"}}
+	if got := primitiveOrRef("Known", reg); got != reg["Known"] {
+		t.Fatal("primitiveOrRef should return an existing named schema")
+	}
+	if got := primitiveOrRef("Later", reg); got.Type != "ref" || got.Name != "Later" {
+		t.Fatalf("forward reference: %#v", got)
+	}
+	if got := primitiveOrRef("boolean", reg); got.Type != "boolean" {
+		t.Fatalf("primitive: %#v", got)
+	}
+
+	if got, err := parseSchema(nil, reg); err != nil || got.Type != "null" {
+		t.Fatalf("empty schema: %#v, %v", got, err)
+	}
+	if got, err := parseSchema(json.RawMessage("null"), reg); err != nil || got.Type != "null" {
+		t.Fatalf("literal schema: %#v, %v", got, err)
+	}
+	if _, err := parseSchema(json.RawMessage{'"'}, reg); err == nil {
+		t.Fatal("parseSchema should reject an incomplete string")
+	}
+	if _, err := parseObject(json.RawMessage("{"), reg); err == nil {
+		t.Fatal("parseObject should reject malformed JSON")
+	}
+	if got, err := parseObject(json.RawMessage(`{}`), reg); err != nil || got.Type != "null" {
+		t.Fatalf("object without type: %#v, %v", got, err)
+	}
+	if got, err := parseObject(json.RawMessage(`{"type":["null","string"]}`), reg); err != nil || got.Type != "union" {
+		t.Fatalf("union shorthand: %#v, %v", got, err)
+	}
+
+	invalidCases := []struct {
+		name string
+		call func() error
+	}{
+		{
+			name: "union member",
+			call: func() error {
+				_, err := parseUnionArray(json.RawMessage(`[{"type":"record","msgpack_unions":1}]`), reg)
+				return err
+			},
+		},
+		{
+			name: "record unions",
+			call: func() error {
+				_, err := parseRecord(map[string]json.RawMessage{
+					"name":           json.RawMessage(`"Bad"`),
+					"msgpack_unions": json.RawMessage(`1`),
+				}, reg)
+				return err
+			},
+		},
+		{
+			name: "record field",
+			call: func() error {
+				_, err := parseRecord(map[string]json.RawMessage{
+					"name":   json.RawMessage(`"Bad"`),
+					"fields": json.RawMessage(`[1]`),
+				}, reg)
+				return err
+			},
+		},
+		{
+			name: "field JSON",
+			call: func() error {
+				_, err := parseField(json.RawMessage(`1`), reg)
+				return err
+			},
+		},
+		{
+			name: "field type",
+			call: func() error {
+				_, err := parseField(json.RawMessage(`{"name":"bad","type":{"type":"record","fields":1}}`), reg)
+				return err
+			},
+		},
+		{
+			name: "array items",
+			call: func() error {
+				_, err := parseArray(map[string]json.RawMessage{
+					"items": json.RawMessage(`{"type":"record","fields":1}`),
+				}, reg)
+				return err
+			},
+		},
+		{
+			name: "map values",
+			call: func() error {
+				_, err := parseMap(map[string]json.RawMessage{
+					"values": json.RawMessage(`{"type":"record","fields":1}`),
+				}, reg)
+				return err
+			},
+		},
+	}
+	for _, tt := range invalidCases {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.call(); err == nil {
+				t.Fatal("expected an error")
+			}
+		})
+	}
+
+	qualified, err := parseRecord(map[string]json.RawMessage{
+		"name":   json.RawMessage(`"Other.AlreadyQualified"`),
+		"fields": json.RawMessage(`[{"name":"plain","type":"string"}]`),
+	}, reg)
+	if err != nil {
+		t.Fatalf("parse qualified record: %v", err)
+	}
+	if qualified.Name != "Other.AlreadyQualified" || qualified.Fields[0].MsgpackKey != "plain" {
+		t.Fatalf("qualified/default key parsing: %#v", qualified)
+	}
+
+	patchRegistry(nil, reg)
+	resolved := (&Schema{Type: "ref", Name: "Known", registry: reg}).resolve()
+	if resolved != reg["Known"] {
+		t.Fatal("resolve should follow a registered reference")
+	}
+	unresolved := &Schema{Type: "ref", Name: "Missing", registry: reg}
+	if unresolved.resolve() != unresolved {
+		t.Fatal("resolve should preserve an unknown reference")
+	}
+}
+
+func TestPrimitiveAndFallbackEncoding(t *testing.T) {
+	tests := []struct {
+		name   string
+		schema *Schema
+		value  any
+	}{
+		{name: "nil schema", schema: nil, value: map[string]any{"ok": true}},
+		{name: "null", schema: &Schema{Type: "null"}, value: "ignored"},
+		{name: "boolean conversion", schema: &Schema{Type: "boolean"}, value: int64(1)},
+		{name: "long conversion", schema: &Schema{Type: "long"}, value: int32(2)},
+		{name: "double conversion", schema: &Schema{Type: "double"}, value: int(3)},
+		{name: "string conversion", schema: &Schema{Type: "string"}, value: []byte("text")},
+		{name: "bytes", schema: &Schema{Type: "bytes"}, value: []byte{1, 2}},
+		{name: "bytes from string", schema: &Schema{Type: "bytes"}, value: "raw"},
+		{name: "invalid bytes", schema: &Schema{Type: "bytes"}, value: 7},
+		{name: "unknown", schema: &Schema{Type: "custom"}, value: "value"},
+		{name: "invalid record", schema: &Schema{Type: "record"}, value: "not a map"},
+		{name: "invalid array", schema: &Schema{Type: "array", Items: &Schema{Type: "int"}}, value: []int{1}},
+		{name: "invalid string map", schema: &Schema{Type: "map", Values: &Schema{Type: "int"}}, value: "not a map"},
+		{name: "invalid typed map", schema: &Schema{Type: "map", KeyType: "int", Values: &Schema{Type: "int"}}, value: map[string]any{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			encoded, err := Encode(tt.schema, tt.value)
+			if err != nil {
+				t.Fatalf("Encode: %v", err)
+			}
+			if _, err := Decode(tt.schema, encoded); err != nil {
+				t.Fatalf("Decode: %v", err)
+			}
+		})
+	}
+
+	holey := &Schema{Type: "record", Fields: []*Field{
+		{Name: "first", Type: &Schema{Type: "int"}, MsgpackKey: 0},
+		{Name: "third", Type: &Schema{Type: "string"}, MsgpackKey: 2},
+	}}
+	encoded, err := Encode(holey, map[string]any{"first": int64(1), "third": "three"})
+	if err != nil {
+		t.Fatalf("Encode holey record: %v", err)
+	}
+	decoded, err := Decode(holey, encoded)
+	if err != nil {
+		t.Fatalf("Decode holey record: %v", err)
+	}
+	if !reflect.DeepEqual(decoded, map[string]any{"first": int64(1), "third": "three"}) {
+		t.Fatalf("holey record: %#v", decoded)
+	}
+
+	defaultKey := &Schema{Type: "record", Fields: []*Field{
+		{Name: "name", Type: &Schema{Type: "string"}},
+	}}
+	if _, err := Encode(defaultKey, map[string]any{"name": "value"}); err != nil {
+		t.Fatalf("Encode default field key: %v", err)
+	}
+
+	allNull := &Schema{Type: "union", UnionOf: []*Schema{{Type: "null"}}}
+	encoded, err = Encode(allNull, "fallback")
+	if err != nil {
+		t.Fatalf("Encode all-null union fallback: %v", err)
+	}
+	decoded, err = Decode(allNull, encoded)
+	if err != nil || decoded != "fallback" {
+		t.Fatalf("all-null union fallback: %#v, %v", decoded, err)
+	}
+}
+
+func TestDecoderErrorsAndNilContainers(t *testing.T) {
+	newDecoder := func(data ...byte) *msgpack.Decoder {
+		return msgpack.NewDecoder(bytes.NewReader(data))
+	}
+	wantError := func(t *testing.T, call func() error) {
+		t.Helper()
+		if err := call(); err == nil {
+			t.Fatal("expected an error")
+		}
+	}
+
+	intField := &Field{Name: "id", Type: &Schema{Type: "int"}, MsgpackKey: 0}
+	intRecord := &Schema{Type: "record", Fields: []*Field{intField}}
+	stringIntRecord := &Schema{Type: "record", Fields: []*Field{
+		{Name: "id", Type: &Schema{Type: "int"}, MsgpackKey: "id"},
+	}}
+
+	if got, err := decodeIntKeyedRecord(intRecord, newDecoder(0xc0)); err != nil || got != nil {
+		t.Fatalf("nil int record: %#v, %v", got, err)
+	}
+	if got, err := decodeStringKeyedRecord(stringIntRecord, newDecoder(0xc0)); err != nil || got != nil {
+		t.Fatalf("nil string record: %#v, %v", got, err)
+	}
+	if got, err := decodeArray(&Schema{Items: &Schema{Type: "int"}}, newDecoder(0xc0)); err != nil || got != nil {
+		t.Fatalf("nil array: %#v, %v", got, err)
+	}
+	if got, err := decodeMap(&Schema{}, newDecoder(0xc0)); err != nil || got != nil {
+		t.Fatalf("nil map: %#v, %v", got, err)
+	}
+
+	errorCases := []struct {
+		name string
+		call func() error
+	}{
+		{name: "record peek", call: func() error { _, err := decodeRecord(intRecord, newDecoder()); return err }},
+		{name: "int record kind", call: func() error { _, err := decodeIntKeyedRecord(intRecord, newDecoder(0x01)); return err }},
+		{name: "int record field", call: func() error { _, err := decodeIntKeyedRecord(intRecord, newDecoder(0x91, 0xa1, 'x')); return err }},
+		{name: "int record unknown", call: func() error { _, err := decodeIntKeyedRecord(&Schema{}, newDecoder(0x91)); return err }},
+		{name: "string record kind", call: func() error { _, err := decodeStringKeyedRecord(stringIntRecord, newDecoder(0x01)); return err }},
+		{name: "string record key", call: func() error {
+			_, err := decodeStringKeyedRecord(stringIntRecord, newDecoder(0x81, 0x01, 0xc0))
+			return err
+		}},
+		{name: "string record field", call: func() error {
+			_, err := decodeStringKeyedRecord(stringIntRecord, newDecoder(0x81, 0xa2, 'i', 'd', 0xa1, 'x'))
+			return err
+		}},
+		{name: "string record unknown", call: func() error {
+			_, err := decodeStringKeyedRecord(stringIntRecord, newDecoder(0x81, 0xa1, 'x'))
+			return err
+		}},
+		{name: "union kind", call: func() error { _, err := decodeUnionDispatch(&Schema{}, newDecoder(0x01)); return err }},
+		{name: "union length", call: func() error { _, err := decodeUnionDispatch(&Schema{}, newDecoder(0x91, 0x00)); return err }},
+		{name: "union discriminator", call: func() error { _, err := decodeUnionDispatch(&Schema{}, newDecoder(0x92, 0xa1, 'x', 0xc0)); return err }},
+		{name: "union payload", call: func() error {
+			s := &Schema{UnionDisp: []*UnionVariant{{Key: 1, Type: "Variant"}}, registry: Registry{"Variant": stringIntRecord}}
+			_, err := decodeUnionDispatch(s, newDecoder(0x92, 0x01, 0x01))
+			return err
+		}},
+		{name: "array kind", call: func() error { _, err := decodeArray(&Schema{}, newDecoder(0x01)); return err }},
+		{name: "array value", call: func() error {
+			_, err := decodeArray(&Schema{Items: &Schema{Type: "int"}}, newDecoder(0x91, 0xa1, 'x'))
+			return err
+		}},
+		{name: "map kind", call: func() error { _, err := decodeMap(&Schema{}, newDecoder(0x01)); return err }},
+		{name: "string map key", call: func() error { _, err := decodeStringMap(&Schema{}, newDecoder(0x01, 0xc0), 1); return err }},
+		{name: "string map value", call: func() error {
+			_, err := decodeStringMap(&Schema{Values: &Schema{Type: "int"}}, newDecoder(0xa1, 'k', 0xa1, 'x'), 1)
+			return err
+		}},
+		{name: "typed map key", call: func() error { _, err := decodeTypedMap(&Schema{KeyType: "int"}, newDecoder(0x01, 0xc0), 1); return err }},
+		{name: "typed map parse", call: func() error {
+			_, err := decodeTypedMap(&Schema{KeyType: "int"}, newDecoder(0xa1, 'x', 0x01), 1)
+			return err
+		}},
+		{name: "typed map value", call: func() error {
+			_, err := decodeTypedMap(&Schema{KeyType: "int", Values: &Schema{Type: "int"}}, newDecoder(0xa1, '1', 0xa1, 'x'), 1)
+			return err
+		}},
+		{name: "union peek", call: func() error { _, err := decodeUnion(&Schema{}, newDecoder()); return err }},
+	}
+	for _, tt := range errorCases {
+		t.Run(tt.name, func(t *testing.T) { wantError(t, tt.call) })
+	}
+
+	if got, err := decodeUnionDispatch(&Schema{}, newDecoder(0xc0)); err != nil || got != nil {
+		t.Fatalf("nil dispatch: %#v, %v", got, err)
+	}
+	if got, err := decodeUnion(&Schema{UnionOf: []*Schema{{Type: "null"}}}, newDecoder(0x01)); err != nil || toInt(got) != 1 {
+		t.Fatalf("union fallback: %#v, %v", got, err)
+	}
+	if got, err := decodeUnion(&Schema{}, newDecoder(0xc0)); err != nil || got != nil {
+		t.Fatalf("nil union: %#v, %v", got, err)
+	}
+	if got, err := decodeValue(nil, newDecoder(0x01)); err != nil || toInt(got) != 1 {
+		t.Fatalf("nil schema decode: %#v, %v", got, err)
+	}
+	if got, err := decodeStringKeyedRecord(intRecord, newDecoder(0x81, 0xa1, '0', 0x01)); err != nil || toInt(got.(map[string]any)["id"]) != 1 {
+		t.Fatalf("integer key in map record: %#v, %v", got, err)
+	}
+}
+
+func TestRegistryPatchRecursesThroughAllContainers(t *testing.T) {
+	reg := Registry{}
+	nested := &Schema{
+		Type:   "record",
+		Fields: []*Field{{Name: "field", Type: &Schema{Type: "string"}}},
+		Items:  &Schema{Type: "int"},
+		Values: &Schema{Type: "long"},
+		UnionOf: []*Schema{
+			{Type: "null"},
+		},
+	}
+	patchRegistry(nested, reg)
+	for name, schema := range map[string]*Schema{
+		"root": nested, "field": nested.Fields[0].Type, "items": nested.Items,
+		"values": nested.Values, "union": nested.UnionOf[0],
+	} {
+		if schema.registry == nil {
+			t.Errorf("%s registry was not patched", name)
+		}
+	}
+}
+
+func TestEncoderPropagatesWriterErrors(t *testing.T) {
+	encoder := func(successfulWrites int) *msgpack.Encoder {
+		return msgpack.NewEncoder(&failAfterWriter{remaining: successfulWrites})
+	}
+	wantWriteError := func(t *testing.T, call func(*msgpack.Encoder) error, successfulWrites int) {
+		t.Helper()
+		if err := call(encoder(successfulWrites)); !errors.Is(err, errForcedWrite) {
+			t.Fatalf("want forced write failure after %d writes, got %v", successfulWrites, err)
+		}
+	}
+
+	t.Run("union dispatch header", func(t *testing.T) {
+		schema := &Schema{UnionDisp: []*UnionVariant{{Key: 1, Type: "Variant"}}}
+		value := map[string]any{"__type": int64(1), "value": "payload"}
+		wantWriteError(t, func(enc *msgpack.Encoder) error {
+			return encodeUnionDispatchRecord(schema, enc, value)
+		}, 0)
+		wantWriteError(t, func(enc *msgpack.Encoder) error {
+			return encodeUnionDispatchRecord(schema, enc, value)
+		}, 1)
+	})
+
+	t.Run("integer record", func(t *testing.T) {
+		regular := &Schema{Fields: []*Field{{Name: "id", Type: &Schema{Type: "int"}, MsgpackKey: 0}}}
+		holey := &Schema{Fields: []*Field{{Name: "id", Type: &Schema{Type: "int"}, MsgpackKey: 1}}}
+		value := map[string]any{"id": int64(1)}
+		wantWriteError(t, func(enc *msgpack.Encoder) error { return encodeIntKeyedRecord(regular, enc, value) }, 0)
+		wantWriteError(t, func(enc *msgpack.Encoder) error { return encodeIntKeyedRecord(holey, enc, value) }, 1)
+		wantWriteError(t, func(enc *msgpack.Encoder) error { return encodeIntKeyedRecord(regular, enc, value) }, 1)
+	})
+
+	t.Run("string record", func(t *testing.T) {
+		schema := &Schema{Fields: []*Field{{Name: "id", Type: &Schema{Type: "int"}, MsgpackKey: "id"}}}
+		value := map[string]any{"id": int64(1)}
+		for successfulWrites := 0; successfulWrites <= 2; successfulWrites++ {
+			wantWriteError(t, func(enc *msgpack.Encoder) error {
+				return encodeStringKeyedRecord(schema, enc, value)
+			}, successfulWrites)
+		}
+	})
+
+	t.Run("array", func(t *testing.T) {
+		schema := &Schema{Items: &Schema{Type: "int"}}
+		for successfulWrites := 0; successfulWrites <= 1; successfulWrites++ {
+			wantWriteError(t, func(enc *msgpack.Encoder) error {
+				return encodeArray(schema, enc, []any{int64(1)})
+			}, successfulWrites)
+		}
+	})
+
+	t.Run("typed map", func(t *testing.T) {
+		schema := &Schema{KeyType: "int", Values: &Schema{Type: "int"}}
+		value := map[any]any{1: int64(2)}
+		for successfulWrites := 0; successfulWrites <= 2; successfulWrites++ {
+			wantWriteError(t, func(enc *msgpack.Encoder) error {
+				return encodeMap(schema, enc, value)
+			}, successfulWrites)
+		}
+	})
+
+	t.Run("string map", func(t *testing.T) {
+		schema := &Schema{Values: &Schema{Type: "int"}}
+		value := map[string]any{"one": int64(1)}
+		for successfulWrites := 0; successfulWrites <= 2; successfulWrites++ {
+			wantWriteError(t, func(enc *msgpack.Encoder) error {
+				return encodeMap(schema, enc, value)
+			}, successfulWrites)
+		}
+	})
 }
