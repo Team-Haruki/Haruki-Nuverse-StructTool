@@ -339,6 +339,36 @@ func TestIntKeyMapRoundtrip(t *testing.T) {
 	}
 }
 
+func TestStringKeyMapRoundtrip(t *testing.T) {
+	const schemaJSON = `{
+	  "type": "record",
+	  "name": "StringKeyedDict",
+	  "namespace": "Test",
+	  "fields": [
+	    {"name": "labels", "type": {"type": "map", "values": "string"}, "msgpack_key": "labels"}
+	  ]
+	}`
+	reg := mustLoad(t, schemaJSON)
+	schema := reg["Test.StringKeyedDict"]
+	input := map[string]any{
+		"labels": map[string]any{"primary": "red", "secondary": "blue"},
+	}
+
+	encoded, err := Encode(schema, input)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	decoded, err := Decode(schema, encoded)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+
+	labels := decoded.(map[string]any)["labels"].(map[string]any)
+	if labels["primary"] != "red" || labels["secondary"] != "blue" {
+		t.Fatalf("labels: got %v", labels)
+	}
+}
+
 func TestUnionDispatchChildA(t *testing.T) {
 	reg := mustLoad(t, unionSchema)
 	schema := reg["UnionBase"]
