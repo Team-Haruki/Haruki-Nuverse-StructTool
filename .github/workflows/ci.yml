@@ -34,6 +34,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install --only-binary :all: ./python
+      - run: "python -m pip install --only-binary=:all: ./python"
       - run: |
           python3 -c 'from avro_parser import LoadFile, Decode; reg, root = LoadFile("data/master.avsc"); print(Decode(reg["Sekai.MasterActionSet"], bytes.fromhex("9B0104A46E6F6E65C2C0AD61735F636473686F705F6D6F62C09101C0CF00000157B64DF001C0")))'
