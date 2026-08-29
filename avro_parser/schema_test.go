@@ -4,6 +4,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
 
 	msgpack "github.com/vmihailenco/msgpack/v5"
@@ -445,5 +448,119 @@ func TestDecodeProducesJSONSerializable(t *testing.T) {
 	_, err := json.Marshal(decoded)
 	if err != nil {
 		t.Fatalf("decoded value is not JSON serializable: %v", err)
+	}
+}
+
+func TestArrayRoundtripAndLoadFile(t *testing.T) {
+	const schemaJSON = `{
+	  "type": "record",
+	  "name": "ArrayContainer",
+	  "namespace": "Test",
+	  "fields": [
+	    {"name": "values", "type": {"type": "array", "items": "long"}, "msgpack_key": "values"}
+	  ]
+	}`
+	path := filepath.Join(t.TempDir(), "array.avsc")
+	if err := os.WriteFile(path, []byte(schemaJSON), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	reg, _, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	input := map[string]any{"values": []any{int64(1), int64(2), int64(3)}}
+	encoded, err := Encode(reg["Test.ArrayContainer"], input)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	decoded, err := Decode(reg["Test.ArrayContainer"], encoded)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if !reflect.DeepEqual(decoded, input) {
+		t.Fatalf("roundtrip: want %#v, got %#v", input, decoded)
+	}
+}
+
+func TestKeyConversions(t *testing.T) {
+	tests := []struct {
+		input   string
+		keyType string
+		want    any
+	}{
+		{input: "12", keyType: "int", want: 12},
+		{input: "13", keyType: "long", want: int64(13)},
+		{input: "1.5", keyType: "float", want: float32(1.5)},
+		{input: "2.5", keyType: "double", want: float64(2.5)},
+		{input: "true", keyType: "boolean", want: true},
+		{input: `\u0041\u00FF`, keyType: "bytes", want: []byte{'A', 0xff}},
+		{input: "plain", keyType: "string", want: "plain"},
+	}
+	for _, tt := range tests {
+		got, err := parseKeyType(tt.input, tt.keyType)
+		if err != nil {
+			t.Fatalf("parseKeyType(%q, %q): %v", tt.input, tt.keyType, err)
+		}
+		if !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("parseKeyType(%q, %q): want %#v, got %#v", tt.input, tt.keyType, tt.want, got)
+		}
+	}
+
+	stringifyTests := []struct {
+		input any
+		want  string
+	}{
+		{input: int(1), want: "1"}, {input: int64(2), want: "2"},
+		{input: float32(1.5), want: "1.5"}, {input: float64(2.5), want: "2.5"},
+		{input: true, want: "true"}, {input: []byte{'A'}, want: `\u0041`},
+		{input: "key", want: "key"}, {input: struct{ N int }{3}, want: "{3}"},
+	}
+	for _, tt := range stringifyTests {
+		if got := stringifyKey(tt.input); got != tt.want {
+			t.Errorf("stringifyKey(%#v): want %q, got %q", tt.input, tt.want, got)
+		}
+	}
+	if got := unescapeBytes(`bad\uZZZZ`); string(got) != `bad\uZZZZ` {
+		t.Fatalf("invalid escape should be preserved, got %q", got)
+	}
+}
+
+func TestValueConversions(t *testing.T) {
+	for _, input := range []any{int(1), int8(1), int16(1), int32(1), int64(1), uint(1), uint64(1), float32(1), float64(1)} {
+		if got, ok := toInt64(input); !ok || got != 1 {
+			t.Errorf("toInt64(%T): got %d, %v", input, got, ok)
+		}
+	}
+	if _, ok := toInt64("bad"); ok {
+		t.Error("toInt64 should reject strings")
+	}
+	for _, input := range []any{float64(2), float32(2), int64(2), int(2)} {
+		if got, ok := toFloat64(input); !ok || got != 2 {
+			t.Errorf("toFloat64(%T): got %v, %v", input, got, ok)
+		}
+	}
+	if _, ok := toFloat64("bad"); ok {
+		t.Error("toFloat64 should reject strings")
+	}
+	if got, ok := toBool(true); !ok || !got {
+		t.Error("toBool(true) failed")
+	}
+	if got, ok := toBool(int64(0)); !ok || got {
+		t.Error("toBool(0) failed")
+	}
+	if _, ok := toBool("bad"); ok {
+		t.Error("toBool should reject strings")
+	}
+	if got, _ := toString([]byte("bytes")); got != "bytes" {
+		t.Errorf("toString bytes: %q", got)
+	}
+	if got, _ := toString(42); got != "42" {
+		t.Errorf("toString fallback: %q", got)
+	}
+	if got, ok := toSlice([]any{1, 2}); !ok || len(got) != 2 {
+		t.Error("toSlice []any failed")
+	}
+	if _, ok := toSlice([]int{1, 2}); ok {
+		t.Error("toSlice should reject typed slices")
 	}
 }

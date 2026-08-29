@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -16,12 +17,20 @@ import (
 )
 
 func main() {
-	schemaFile := flag.String("schema", "", "Avro schema JSON file (single or --all output)")
-	className := flag.String("class", "", "Class name to use as root schema")
-	hexData := flag.String("hex", "", "Compact msgpack bytes as hex string to decode")
-	jsonData := flag.String("json", "", "JSON string to encode to compact msgpack")
-	verbose := flag.Bool("v", false, "Enable verbose (debug) logging")
-	flag.Parse()
+	os.Exit(run(os.Args[1:], os.Stdout))
+}
+
+func run(args []string, stdout io.Writer) int {
+	flags := flag.NewFlagSet("structtool", flag.ContinueOnError)
+	flags.SetOutput(stdout)
+	schemaFile := flags.String("schema", "", "Avro schema JSON file (single or --all output)")
+	className := flags.String("class", "", "Class name to use as root schema")
+	hexData := flags.String("hex", "", "Compact msgpack bytes as hex string to decode")
+	jsonData := flags.String("json", "", "JSON string to encode to compact msgpack")
+	verbose := flags.Bool("v", false, "Enable verbose (debug) logging")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
 
 	logLevel := slog.LevelInfo
 	if *verbose {
@@ -29,23 +38,23 @@ func main() {
 	}
 
 	opts := &slog.HandlerOptions{Level: logLevel}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, opts))
+	logger := slog.New(slog.NewTextHandler(stdout, opts))
 
 	if *schemaFile == "" || *className == "" {
-		flag.Usage()
-		os.Exit(1)
+		flags.Usage()
+		return 1
 	}
 
 	reg, _, err := AvroParser.LoadFile(*schemaFile)
 	if err != nil {
 		logger.Error("failed to load schema", "error", err)
-		os.Exit(1)
+		return 1
 	}
 
 	schema := reg[*className]
 	if schema == nil {
 		logger.Error("class not found in schema", "class", *className, "available", schemaNames(reg))
-		os.Exit(1)
+		return 1
 	}
 
 	switch {
@@ -53,17 +62,17 @@ func main() {
 		data, err := hex.DecodeString(*hexData)
 		if err != nil {
 			logger.Error("hex decode failed", "error", err)
-			os.Exit(1)
+			return 1
 		}
 
 		value, err := AvroParser.Decode(schema, data)
 		if err != nil {
 			logger.Error("decode failed", "error", err)
-			os.Exit(1)
+			return 1
 		}
 
 		out, _ := json.MarshalIndent(value, "", "  ")
-		fmt.Println(string(out))
+		fmt.Fprintln(stdout, string(out))
 
 		reEncoded, err := AvroParser.Encode(schema, value)
 		if err != nil {
@@ -82,17 +91,17 @@ func main() {
 		var obj any
 		if err := json.Unmarshal([]byte(*jsonData), &obj); err != nil {
 			logger.Error("json parse failed", "error", err)
-			os.Exit(1)
+			return 1
 		}
 
 		data, err := AvroParser.Encode(schema, obj)
 		if err != nil {
 			logger.Error("encode failed", "error", err)
-			os.Exit(1)
+			return 1
 		}
 
 		hexOutput := strings.ToUpper(hex.EncodeToString(data))
-		fmt.Println(hexOutput)
+		fmt.Fprintln(stdout, hexOutput)
 
 		value, err := AvroParser.Decode(schema, data)
 		if err != nil {
@@ -103,10 +112,12 @@ func main() {
 		}
 
 	default:
-		flag.Usage()
-		os.Exit(1)
+		flags.Usage()
+		return 1
 	}
+	return 0
 }
+
 func schemaNames(reg AvroParser.Registry) []string {
 	var names []string
 	for k, v := range reg {
