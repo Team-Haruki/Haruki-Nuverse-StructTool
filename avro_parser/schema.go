@@ -554,26 +554,28 @@ func decodeMap(schema *Schema, dec *msgpack.Decoder) (any, error) {
 	}
 
 	if schema.KeyType == "" {
-		// Standard string-keyed map.
-		result := make(map[string]any, length)
-		for i := 0; i < length; i++ {
-			key, err := dec.DecodeString()
-			if err != nil {
-				return nil, fmt.Errorf("map key #%d: %w", i, err)
-			}
-			// The key is stored as a JSON-stringified original value per the schema spec;
-			// decode it back to the native type.
-			nativeKey := key // keep as string if no key_type
-			val, err := decodeValue(schema.Values, dec)
-			if err != nil {
-				return nil, fmt.Errorf("map value[%s]: %w", key, err)
-			}
-			result[nativeKey] = val
-		}
-		return result, nil
+		return decodeStringMap(schema, dec, length)
 	}
+	return decodeTypedMap(schema, dec, length)
+}
 
-	// Non-string key map: keys were stringified as JSON before storing.
+func decodeStringMap(schema *Schema, dec *msgpack.Decoder, length int) (any, error) {
+	result := make(map[string]any, length)
+	for i := 0; i < length; i++ {
+		key, err := dec.DecodeString()
+		if err != nil {
+			return nil, fmt.Errorf("map key #%d: %w", i, err)
+		}
+		val, err := decodeValue(schema.Values, dec)
+		if err != nil {
+			return nil, fmt.Errorf("map value[%s]: %w", key, err)
+		}
+		result[key] = val
+	}
+	return result, nil
+}
+
+func decodeTypedMap(schema *Schema, dec *msgpack.Decoder, length int) (any, error) {
 	result := make(map[any]any, length)
 	for i := 0; i < length; i++ {
 		rawKey, err := dec.DecodeString()
@@ -690,82 +692,87 @@ func encodeRecord(schema *Schema, enc *msgpack.Encoder, value any) error {
 		return enc.EncodeNil()
 	}
 
-	// Union dispatch records.
 	if len(schema.UnionDisp) > 0 {
-		discriminator, _ := toInt64(m["__type"])
-		payload := m["value"]
-		var variantSchema *Schema
-		for _, v := range schema.UnionDisp {
-			if int64(v.Key) == discriminator {
-				if schema.registry != nil {
-					variantSchema = schema.registry[v.Type]
-				}
-				break
-			}
-		}
-		if err := enc.EncodeArrayLen(2); err != nil {
-			return err
-		}
-		if err := enc.EncodeInt(discriminator); err != nil {
-			return err
-		}
-		return encodeValue(variantSchema, enc, payload)
+		return encodeUnionDispatchRecord(schema, enc, m)
 	}
+	if hasIntMsgpackKey(schema.Fields) {
+		return encodeIntKeyedRecord(schema, enc, m)
+	}
+	return encodeStringKeyedRecord(schema, enc, m)
+}
 
-	// Determine if int-keyed: at least one field has an int MsgpackKey.
-	intKeyed := false
-	for _, f := range schema.Fields {
-		if _, ok := f.MsgpackKey.(int); ok {
-			intKeyed = true
+func encodeUnionDispatchRecord(schema *Schema, enc *msgpack.Encoder, value map[string]any) error {
+	discriminator, _ := toInt64(value["__type"])
+	var variantSchema *Schema
+	for _, variant := range schema.UnionDisp {
+		if int64(variant.Key) == discriminator {
+			if schema.registry != nil {
+				variantSchema = schema.registry[variant.Type]
+			}
 			break
 		}
 	}
+	if err := enc.EncodeArrayLen(2); err != nil {
+		return err
+	}
+	if err := enc.EncodeInt(discriminator); err != nil {
+		return err
+	}
+	return encodeValue(variantSchema, enc, value["value"])
+}
 
-	if intKeyed {
-		// Find highest key to determine array length.
-		maxIdx := -1
-		for _, f := range schema.Fields {
-			if idx, ok := f.MsgpackKey.(int); ok && idx > maxIdx {
+func hasIntMsgpackKey(fields []*Field) bool {
+	for _, field := range fields {
+		if _, ok := field.MsgpackKey.(int); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func encodeIntKeyedRecord(schema *Schema, enc *msgpack.Encoder, value map[string]any) error {
+	maxIdx := -1
+	byIdx := make(map[int]*Field, len(schema.Fields))
+	for _, field := range schema.Fields {
+		if idx, ok := field.MsgpackKey.(int); ok {
+			byIdx[idx] = field
+			if idx > maxIdx {
 				maxIdx = idx
 			}
 		}
-		if err := enc.EncodeArrayLen(maxIdx + 1); err != nil {
-			return err
-		}
-		byIdx := make(map[int]*Field, len(schema.Fields))
-		for _, f := range schema.Fields {
-			if idx, ok := f.MsgpackKey.(int); ok {
-				byIdx[idx] = f
-			}
-		}
-		for i := 0; i <= maxIdx; i++ {
-			if f, ok := byIdx[i]; ok {
-				if err := encodeValue(f.Type, enc, m[f.Name]); err != nil {
-					return fmt.Errorf("field %s: %w", f.Name, err)
-				}
-			} else {
-				if err := enc.EncodeNil(); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
 	}
+	if err := enc.EncodeArrayLen(maxIdx + 1); err != nil {
+		return err
+	}
+	for i := 0; i <= maxIdx; i++ {
+		field, ok := byIdx[i]
+		if !ok {
+			if err := enc.EncodeNil(); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := encodeValue(field.Type, enc, value[field.Name]); err != nil {
+			return fmt.Errorf("field %s: %w", field.Name, err)
+		}
+	}
+	return nil
+}
 
-	// String-keyed.
+func encodeStringKeyedRecord(schema *Schema, enc *msgpack.Encoder, value map[string]any) error {
 	if err := enc.EncodeMapLen(len(schema.Fields)); err != nil {
 		return err
 	}
-	for _, f := range schema.Fields {
-		key, _ := f.MsgpackKey.(string)
+	for _, field := range schema.Fields {
+		key, _ := field.MsgpackKey.(string)
 		if key == "" {
-			key = f.Name
+			key = field.Name
 		}
 		if err := enc.EncodeString(key); err != nil {
 			return err
 		}
-		if err := encodeValue(f.Type, enc, m[f.Name]); err != nil {
-			return fmt.Errorf("field %s: %w", f.Name, err)
+		if err := encodeValue(field.Type, enc, value[field.Name]); err != nil {
+			return fmt.Errorf("field %s: %w", field.Name, err)
 		}
 	}
 	return nil

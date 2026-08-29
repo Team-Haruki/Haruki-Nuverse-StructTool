@@ -154,40 +154,62 @@ def _decode_value(schema: Schema | None, value: Any):
 
 def _decode_record(schema: Schema, value: Any):
     if schema.union_disp:
-        discriminator = value[0]
-        payload_schema = None
-        for variant in schema.union_disp:
-            if variant.key == discriminator and schema.registry:
-                payload_schema = schema.registry.get(variant.type)
-                break
-        return {"__type": discriminator, "value": _decode_value(payload_schema, value[1])}
+        return _decode_union_record(schema, value)
     if isinstance(value, list):
-        by_index = {field.msgpack_key: field for field in schema.fields if isinstance(field.msgpack_key, int)}
-        result = {}
-        for idx, item in enumerate(value):
-            field = by_index.get(idx)
-            if field is not None:
-                result[field.name] = _decode_value(field.type, item)
-        return result
+        return _decode_array_record(schema, value)
     if isinstance(value, dict):
-        by_key = {}
-        for field in schema.fields:
-            if isinstance(field.msgpack_key, str):
-                by_key[field.msgpack_key] = field
-            elif isinstance(field.msgpack_key, int):
-                by_key[str(field.msgpack_key)] = field
-        result = {}
-        consumed = set()
-        for key, item in value.items():
-            field = by_key.get(str(key))
-            if field is not None:
-                consumed.add(key)
-                result[field.name] = _decode_value(field.type, item)
-        for key, item in value.items():
-            if key not in consumed:
-                result[key] = item
-        return result
+        return _decode_dict_record(schema, value)
     return value
+
+
+def _decode_union_record(schema: Schema, value: list[Any]):
+    discriminator = value[0]
+    payload_schema = None
+    for variant in schema.union_disp:
+        if variant.key == discriminator and schema.registry:
+            payload_schema = schema.registry.get(variant.type)
+            break
+    return {"__type": discriminator, "value": _decode_value(payload_schema, value[1])}
+
+
+def _decode_array_record(schema: Schema, value: list[Any]):
+    by_index = {field.msgpack_key: field for field in schema.fields if isinstance(field.msgpack_key, int)}
+    result = {}
+    for idx, item in enumerate(value):
+        field = by_index.get(idx)
+        if field is not None:
+            result[field.name] = _decode_value(field.type, item)
+    return result
+
+
+def _decode_dict_record(schema: Schema, value: dict[Any, Any]):
+    by_key = _record_fields_by_key(schema)
+    result, consumed = _decode_known_record_fields(by_key, value)
+    for key, item in value.items():
+        if key not in consumed:
+            result[key] = item
+    return result
+
+
+def _record_fields_by_key(schema: Schema):
+    by_key = {}
+    for field in schema.fields:
+        if isinstance(field.msgpack_key, str):
+            by_key[field.msgpack_key] = field
+        elif isinstance(field.msgpack_key, int):
+            by_key[str(field.msgpack_key)] = field
+    return by_key
+
+
+def _decode_known_record_fields(by_key: dict[str, Field], value: dict[Any, Any]):
+    result = {}
+    consumed = set()
+    for key, item in value.items():
+        field = by_key.get(str(key))
+        if field is not None:
+            consumed.add(key)
+            result[field.name] = _decode_value(field.type, item)
+    return result, consumed
 
 
 def Encode(schema: Schema, value: Any) -> bytes:

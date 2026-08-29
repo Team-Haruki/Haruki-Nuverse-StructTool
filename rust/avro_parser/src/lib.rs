@@ -379,60 +379,87 @@ fn restore_record(
     registry: &Registry,
 ) -> Result<JsonValue, String> {
     if !schema.union_disp.is_empty() {
-        let arr = value
-            .as_array()
-            .ok_or_else(|| "union dispatch is not array".to_string())?;
-        if arr.len() != 2 {
-            return Ok(value.clone());
-        }
-        let discriminator = arr[0].as_i64().unwrap_or_default();
-        let payload_schema = schema
-            .union_disp
-            .iter()
-            .find(|variant| variant.key == discriminator)
-            .and_then(|variant| registry.get(&variant.ty));
-        let payload = match payload_schema {
-            Some(schema) => restore_json(schema, &arr[1], registry)?,
-            None => arr[1].clone(),
-        };
-        return Ok(serde_json::json!({"__type": discriminator, "value": payload}));
+        return restore_union_dispatch_record(schema, value, registry);
     }
 
     if let Some(arr) = value.as_array() {
-        let mut out = JsonMap::new();
-        for field in &schema.fields {
-            if let MsgpackKey::Int(idx) = field.msgpack_key {
-                if let Some(item) = arr.get(idx as usize) {
-                    out.insert(field.name.clone(), restore_json(&field.ty, item, registry)?);
-                }
-            }
-        }
-        return Ok(JsonValue::Object(out));
+        return restore_array_record(schema, arr, registry);
     }
 
     if let Some(obj) = value.as_object() {
-        let mut out = JsonMap::new();
-        let mut consumed = HashSet::new();
-        for field in &schema.fields {
-            let key = match &field.msgpack_key {
-                MsgpackKey::String(key) => key.clone(),
-                MsgpackKey::Int(idx) => idx.to_string(),
-            };
-            let raw = obj.get(&key);
-            if let Some(item) = raw {
-                consumed.insert(key);
-                out.insert(field.name.clone(), restore_json(&field.ty, item, registry)?);
-            }
-        }
-        for (key, item) in obj {
-            if !consumed.contains(key) {
-                out.insert(key.clone(), item.clone());
-            }
-        }
-        return Ok(JsonValue::Object(out));
+        return restore_object_record(schema, obj, registry);
     }
 
     Ok(value.clone())
+}
+
+fn restore_union_dispatch_record(
+    schema: &Schema,
+    value: &JsonValue,
+    registry: &Registry,
+) -> Result<JsonValue, String> {
+    let arr = value
+        .as_array()
+        .ok_or_else(|| "union dispatch is not array".to_string())?;
+    if arr.len() != 2 {
+        return Ok(value.clone());
+    }
+    let discriminator = arr[0].as_i64().unwrap_or_default();
+    let payload_schema = schema
+        .union_disp
+        .iter()
+        .find(|variant| variant.key == discriminator)
+        .and_then(|variant| registry.get(&variant.ty));
+    let payload = match payload_schema {
+        Some(schema) => restore_json(schema, &arr[1], registry)?,
+        None => arr[1].clone(),
+    };
+    Ok(serde_json::json!({"__type": discriminator, "value": payload}))
+}
+
+fn restore_array_record(
+    schema: &Schema,
+    value: &[JsonValue],
+    registry: &Registry,
+) -> Result<JsonValue, String> {
+    let mut out = JsonMap::new();
+    for field in &schema.fields {
+        if let MsgpackKey::Int(idx) = field.msgpack_key {
+            if let Some(item) = value.get(idx as usize) {
+                out.insert(field.name.clone(), restore_json(&field.ty, item, registry)?);
+            }
+        }
+    }
+    Ok(JsonValue::Object(out))
+}
+
+fn restore_object_record(
+    schema: &Schema,
+    value: &JsonMap<String, JsonValue>,
+    registry: &Registry,
+) -> Result<JsonValue, String> {
+    let mut out = JsonMap::new();
+    let mut consumed = HashSet::new();
+    for field in &schema.fields {
+        let key = msgpack_key_string(&field.msgpack_key);
+        if let Some(item) = value.get(&key) {
+            consumed.insert(key);
+            out.insert(field.name.clone(), restore_json(&field.ty, item, registry)?);
+        }
+    }
+    for (key, item) in value {
+        if !consumed.contains(key) {
+            out.insert(key.clone(), item.clone());
+        }
+    }
+    Ok(JsonValue::Object(out))
+}
+
+fn msgpack_key_string(key: &MsgpackKey) -> String {
+    match key {
+        MsgpackKey::String(key) => key.clone(),
+        MsgpackKey::Int(idx) => idx.to_string(),
+    }
 }
 
 fn rmpv_to_json(value: rmpv::Value) -> Result<JsonValue, String> {
