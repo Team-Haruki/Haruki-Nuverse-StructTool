@@ -1,0 +1,62 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: wednesday
+      time: "11:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "[Chore] "
+    cooldown:
+      default-days: 3
+    groups:
+      gomod-minor-patch:
+        update-types: ["minor", "patch"]
+  - package-ecosystem: cargo
+    directory: "/rust/avro_parser"
+    schedule:
+      interval: weekly
+      day: wednesday
+      time: "11:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "[Chore] "
+    cooldown:
+      default-days: 3
+    groups:
+      cargo-minor-patch:
+        update-types: ["minor", "patch"]
+  - package-ecosystem: uv
+    directory: "/python"
+    schedule:
+      interval: weekly
+      day: wednesday
+      time: "11:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "[Chore] "
+    cooldown:
+      default-days: 3
+    groups:
+      uv-minor-patch:
+        update-types: ["minor", "patch"]
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: wednesday
+      time: "11:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "[Chore] "
+    cooldown:
+      default-days: 3
+    groups:
+      github-actions:
+        patterns: ["*"]
