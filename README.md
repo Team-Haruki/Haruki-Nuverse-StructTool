@@ -14,8 +14,11 @@ go build
 ## Go CLI Usage
 
 ```bash
-go run . --schema <schema.avsc.json> --class <ClassName> --hex <hex>
+go run . --schema <schema.avsc> --class <ClassName> --hex <hex>    # decode compact msgpack to JSON
+go run . --schema <schema.avsc> --class <ClassName> --json <json>  # encode JSON to compact msgpack (hex)
 ```
+
+Add `-v` for debug logging (including the decode/re-encode round-trip check).
 
 Example:
 
@@ -105,6 +108,6 @@ In the Haruki-Sekai-API repository, these files are produced from the schema bun
 
 ```bash
 go test ./...
-cargo check --manifest-path rust/avro_parser/Cargo.toml
-PYTHONPATH=python python3 -c 'import avro_parser'
+cargo test --manifest-path rust/avro_parser/Cargo.toml
+(cd python && uv run --group test python -m unittest discover -s tests)
 ```
